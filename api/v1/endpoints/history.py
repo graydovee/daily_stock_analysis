@@ -25,6 +25,7 @@ from api.v1.schemas.history import (
     ReportSummary,
     ReportStrategy,
     ReportDetails,
+    MarkdownReportResponse,
 )
 from api.v1.schemas.common import ErrorResponse
 from src.storage import DatabaseManager
@@ -286,5 +287,63 @@ def get_history_news(
             detail={
                 "error": "internal_error",
                 "message": f"查询新闻情报失败: {str(e)}"
+            }
+        )
+
+
+@router.get(
+    "/{record_id}/markdown",
+    response_model=MarkdownReportResponse,
+    responses={
+        200: {"description": "Markdown 格式报告"},
+        404: {"description": "报告不存在", "model": ErrorResponse},
+        500: {"description": "服务器错误", "model": ErrorResponse},
+    },
+    summary="获取历史报告 Markdown 格式",
+    description="根据分析历史记录 ID 获取 Markdown 格式的完整分析报告"
+)
+def get_history_markdown(
+    record_id: str,
+    db_manager: DatabaseManager = Depends(get_database_manager)
+) -> MarkdownReportResponse:
+    """
+    获取历史报告的 Markdown 格式内容
+
+    根据分析历史记录 ID 或 query_id 生成与推送通知格式一致的 Markdown 报告。
+
+    Args:
+        record_id: 分析历史记录主键 ID（整数）或 query_id（字符串）
+        db_manager: 数据库管理器依赖
+
+    Returns:
+        MarkdownReportResponse: Markdown 格式的完整报告
+
+    Raises:
+        HTTPException: 404 - 报告不存在
+    """
+    try:
+        service = HistoryService(db_manager)
+        markdown_content = service.get_markdown_report(record_id)
+
+        if markdown_content is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "not_found",
+                    "message": f"未找到 id/query_id={record_id} 的分析记录或无法生成报告"
+                }
+            )
+
+        return MarkdownReportResponse(content=markdown_content)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取 Markdown 报告失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "internal_error",
+                "message": f"获取 Markdown 报告失败: {str(e)}"
             }
         )
