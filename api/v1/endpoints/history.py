@@ -29,7 +29,7 @@ from api.v1.schemas.history import (
 )
 from api.v1.schemas.common import ErrorResponse
 from src.storage import DatabaseManager
-from src.services.history_service import HistoryService
+from src.services.history_service import HistoryService, MarkdownReportGenerationError
 from src.utils.data_processing import normalize_model_used
 
 logger = logging.getLogger(__name__)
@@ -320,30 +320,29 @@ def get_history_markdown(
 
     Raises:
         HTTPException: 404 - 报告不存在
+        HTTPException: 500 - 报告生成失败（服务器内部错误）
     """
+    service = HistoryService(db_manager)
+
     try:
-        service = HistoryService(db_manager)
         markdown_content = service.get_markdown_report(record_id)
-
-        if markdown_content is None:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "error": "not_found",
-                    "message": f"未找到 id/query_id={record_id} 的分析记录或无法生成报告"
-                }
-            )
-
-        return MarkdownReportResponse(content=markdown_content)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"获取 Markdown 报告失败: {e}", exc_info=True)
+    except MarkdownReportGenerationError as e:
+        logger.error(f"Markdown report generation failed for {record_id}: {e.message}")
         raise HTTPException(
             status_code=500,
             detail={
-                "error": "internal_error",
-                "message": f"获取 Markdown 报告失败: {str(e)}"
+                "error": "generation_failed",
+                "message": f"生成 Markdown 报告失败: {e.message}"
             }
         )
+
+    if markdown_content is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "not_found",
+                "message": f"未找到 id/query_id={record_id} 的分析记录"
+            }
+        )
+
+    return MarkdownReportResponse(content=markdown_content)

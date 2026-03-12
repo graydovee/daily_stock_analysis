@@ -22,6 +22,15 @@ from src.analyzer import AnalysisResult
 logger = logging.getLogger(__name__)
 
 
+class MarkdownReportGenerationError(Exception):
+    """Exception raised when Markdown report generation fails due to internal errors."""
+
+    def __init__(self, message: str, record_id: str = None):
+        self.message = message
+        self.record_id = record_id
+        super().__init__(self.message)
+
+
 class HistoryService:
     """
     历史查询服务
@@ -388,29 +397,49 @@ class HistoryService:
 
         Returns:
             Markdown formatted report string, or None if record not found
+
+        Raises:
+            MarkdownReportGenerationError: If report generation fails due to internal errors
         """
-        try:
-            record = self._resolve_record(record_id)
-            if not record:
-                logger.warning(f"get_markdown_report: record not found for {record_id}")
-                return None
-
-            # Rebuild AnalysisResult from raw_result
-            raw_result = parse_json_field(record.raw_result)
-            if not raw_result:
-                logger.warning(f"get_markdown_report: raw_result is empty for {record_id}")
-                return None
-
-            result = self._rebuild_analysis_result(raw_result, record)
-            if not result:
-                return None
-
-            # Generate Markdown report
-            return self._generate_single_stock_markdown(result, record)
-
-        except Exception as e:
-            logger.error(f"get_markdown_report failed for {record_id}: {e}", exc_info=True)
+        record = self._resolve_record(record_id)
+        if not record:
+            logger.warning(f"get_markdown_report: record not found for {record_id}")
             return None
+
+        # Rebuild AnalysisResult from raw_result
+        raw_result = parse_json_field(record.raw_result)
+        if not raw_result:
+            logger.error(f"get_markdown_report: raw_result is empty for {record_id}")
+            raise MarkdownReportGenerationError(
+                f"raw_result is empty or invalid for record {record_id}",
+                record_id=record_id
+            )
+
+        try:
+            result = self._rebuild_analysis_result(raw_result, record)
+        except Exception as e:
+            logger.error(f"get_markdown_report: failed to rebuild AnalysisResult for {record_id}: {e}", exc_info=True)
+            raise MarkdownReportGenerationError(
+                f"Failed to rebuild AnalysisResult: {str(e)}",
+                record_id=record_id
+            ) from e
+
+        if not result:
+            logger.error(f"get_markdown_report: _rebuild_analysis_result returned None for {record_id}")
+            raise MarkdownReportGenerationError(
+                f"Failed to rebuild AnalysisResult from raw_result",
+                record_id=record_id
+            )
+
+        # Generate Markdown report
+        try:
+            return self._generate_single_stock_markdown(result, record)
+        except Exception as e:
+            logger.error(f"get_markdown_report: failed to generate markdown for {record_id}: {e}", exc_info=True)
+            raise MarkdownReportGenerationError(
+                f"Failed to generate markdown report: {str(e)}",
+                record_id=record_id
+            ) from e
 
     def _rebuild_analysis_result(
         self,
@@ -734,6 +763,32 @@ class HistoryService:
             return ('观望', '⚪', '观望')
 
     @staticmethod
+    def _safe_format_number(value: Any, fmt: str = ".2f") -> str:
+        """
+        Safely format a numeric value that may be a string.
+
+        Args:
+            value: The value to format (may be int, float, or string like "12.34" or "N/A")
+            fmt: Format string (default: ".2f")
+
+        Returns:
+            Formatted string or original string if not a valid number
+        """
+        if value is None:
+            return "N/A"
+        if isinstance(value, (int, float)):
+            return f"{value:{fmt}}"
+        if isinstance(value, str):
+            value = value.strip()
+            if not value or value in ("N/A", "-", "—", "None"):
+                return "N/A"
+            try:
+                return f"{float(value):{fmt}}"
+            except (ValueError, TypeError):
+                return value
+        return str(value)
+
+    @staticmethod
     def _append_market_snapshot_to_report(lines: List[str], result: AnalysisResult) -> None:
         """Append market snapshot data to report lines."""
         snapshot = getattr(result, 'market_snapshot', None)
@@ -751,24 +806,25 @@ class HistoryService:
         current_price = snapshot.get('current_price') or result.current_price
         change_pct = snapshot.get('change_pct') or result.change_pct
         if current_price is not None:
-            change_str = f"{change_pct:+.2f}%" if change_pct is not None else "--"
-            lines.append(f"| 当前价 | **{current_price:.2f}** ({change_str}) |")
+            current_str = HistoryService._safe_format_number(current_price, ".2f")
+            if change_pct is not None:
+                change_str = f"{HistoryService._safe_format_number(change_pct, '+.2f')}%"
+            else:
+                change_str = "--"
+            lines.append(f"| 当前价 | **{current_str}** ({change_str}) |")
 
         # Other metrics
         metrics = [
             ("开盘价", "open", ".2f"),
             ("最高价", "high", ".2f"),
             ("最低价", "low", ".2f"),
-            ("成交量", "volume", ""),
-            ("成交额", "amount", ""),
+            ("成交量", "volume", ",.0f"),
+            ("成交额", "amount", ",.0f"),
         ]
         for label, key, fmt in metrics:
             value = snapshot.get(key)
             if value is not None:
-                if fmt:
-                    formatted = f"{value:{fmt}}"
-                else:
-                    formatted = f"{value:,.0f}" if isinstance(value, (int, float)) else str(value)
+                formatted = HistoryService._safe_format_number(value, fmt)
                 lines.append(f"| {label} | {formatted} |")
 
         lines.extend(["", "---", ""])
