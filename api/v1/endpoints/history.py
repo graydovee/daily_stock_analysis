@@ -335,6 +335,15 @@ def get_history_markdown(
                 "message": f"生成 Markdown 报告失败: {e.message}"
             }
         )
+    except Exception as e:
+        logger.error(f"获取 Markdown 报告失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "internal_error",
+                "message": f"获取 Markdown 报告失败: {str(e)}"
+            }
+        )
 
     if markdown_content is None:
         raise HTTPException(
