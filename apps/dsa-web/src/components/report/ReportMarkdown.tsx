@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { historyApi } from '../../api/history';
@@ -25,6 +25,14 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
   const [content, setContent] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isOpen, setIsOpen] = useState(true);
+
+  // Handle close with animation
+  const handleClose = useCallback(() => {
+    setIsOpen(false);
+    // Delay actual close to allow animation to complete
+    setTimeout(onClose, 300);
+  }, [onClose]);
 
   useEffect(() => {
     let isMounted = true;
@@ -56,7 +64,7 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
   }, [recordId]);
 
   return (
-    <Drawer isOpen={true} onClose={onClose} width="max-w-3xl" zIndex={100}>
+    <Drawer isOpen={isOpen} onClose={handleClose} width="max-w-3xl" zIndex={100}>
       {/* Custom Header */}
       <div className="flex items-center gap-3 mb-4">
         <div className="w-8 h-8 rounded-lg bg-purple/20 flex items-center justify-center">
@@ -86,7 +94,7 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
           <p className="text-danger text-sm">{error}</p>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="mt-4 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-sm text-secondary transition-colors"
           >
             关闭
@@ -124,7 +132,7 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
       <div className="flex justify-end mt-6 pt-4 border-t border-white/10">
         <button
           type="button"
-          onClick={onClose}
+          onClick={handleClose}
           className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-sm text-secondary hover:text-white transition-colors"
         >
           关闭
